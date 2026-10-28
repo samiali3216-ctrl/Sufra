@@ -19,7 +19,7 @@
     "crons": ["* * * * *"]
   },
   "vars": {
-    "ORIGIN": "https://sofasufra.samiali3216.workers.dev"
+    "ORIGIN": "https://sofasufra.sofafood.workers.dev"
   },
   "observability": {
     "enabled": true
