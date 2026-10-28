@@ -2,13 +2,24 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sufra",
   "compatibility_date": "2026-10-28",
+  "compatibility_flags": ["nodejs_compat"],
   "main": "src/worker.js",
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sufra-db",
+      "database_id": "2d817db8-946b-4fb2-88ee-0fcb843f70ce"
+    }
+  ],
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "vars": {
-    "API_URL": "https://sufra-backend.onrender.com"
+    "ORIGIN": "https://sofasufra.samiali3216.workers.dev"
   },
   "observability": {
     "enabled": true
