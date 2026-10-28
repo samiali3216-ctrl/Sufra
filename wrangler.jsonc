@@ -3,6 +3,7 @@
   "name": "sufra",
   "compatibility_date": "2026-10-28",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
   "main": "src/worker.js",
   "assets": {
     "directory": "./dist",
