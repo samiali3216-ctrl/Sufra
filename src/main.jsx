@@ -1,0 +1,10 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import Portal from "./Portal.jsx";
+import "./style.css";
+import "./portal.css";
+import "./theme.css";
+import "./employee.css";
+import "./admin.css";
+export const root = createRoot(document.getElementById("root"));
+root.render(<Portal />);

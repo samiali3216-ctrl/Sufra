@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.npm-cache/
+*.log
+data/
+.env
+.env.*
+!.env.example
+coverage/
+/dist.zip
+/24.13.0
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pem
+*.key
