@@ -6,6 +6,8 @@ import { hash, token, passwordHash, passwordMatches, validNetwork, networkMatche
 import { createPushService, validPushEndpoint } from "./push.js";
 import { dayKey, cutoff, previousDay, withinOffice, csvCell, MEALS } from "./domain.js";
 
+console.log("Worker module loaded successfully");
+
 // ─── Error handling ───
 class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -297,7 +299,20 @@ const admin = async (c, next) => { if (c.get("user")?.role === "admin") await ne
 const employee = async (c, next) => { if (c.get("user")?.role === "employee") await next(); else fail(403, "هذه العملية لحساب الموظف فقط."); };
 
 // ─── Routes: Health & Setup ───
-app.get("/api/health", (c) => c.json({ ok: true }));
+app.get("/api/health", async (c) => {
+  if (c.req.query("connectivity") !== "1") return c.json({ ok: true });
+  // Fixed public names only: diagnose DNS from the edge without accessing user data.
+  const checks = await Promise.all(["sofasufra.pages.dev", "sofasufra.sofafood.workers.dev"].map(async hostname => {
+    try {
+      const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
+        headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000),
+      });
+      const result = await response.json();
+      return { hostname, status: result.Status, answers: result.Answer || [] };
+    } catch { return { hostname, error: "DNS lookup unavailable" }; }
+  }));
+  return c.json({ ok: true, checks });
+});
 
 app.get("/api/setup", async (c) => {
   const row = await c.env.DB.prepare("SELECT id FROM users LIMIT 1").first();
@@ -387,7 +402,10 @@ app.post("/api/auth/activate", async (c) => {
 // ─── Routes: Employee ───
 app.get("/api/today", auth, async (c) => c.json(await today(c.env.DB, c.get("user"))));
 
-app.get("/api/push/config", auth, employee, (c) => c.json({ publicKey: "" }));
+app.get("/api/push/config", auth, employee, async (c) => {
+  const push = await createPushService(c.env.DB, c.env.ORIGIN);
+  return c.json({ publicKey: push.publicKey });
+});
 
 app.post("/api/push/subscriptions", auth, employee, async (c) => {
   const db = c.env.DB;
@@ -404,6 +422,15 @@ app.delete("/api/push/subscriptions", auth, employee, async (c) => {
   const body = parseBody(z.object({ endpoint: z.string().refine(validPushEndpoint) }).strict(), await c.req.json());
   await c.env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND user_id=?").bind(body.endpoint, c.get("user").id).run();
   return c.json({ subscribed: false });
+});
+
+app.post("/api/push/test", auth, employee, async (c) => {
+  rate(`push-test:${c.get("user").id}`, 5);
+  const { endpoint } = parseBody(z.object({ endpoint: z.string().refine(validPushEndpoint) }).strict(), await c.req.json());
+  const push = await createPushService(c.env.DB, c.env.ORIGIN);
+  const delivery = await push.deliver({ title: "الإشعارات جاهزة", message: "وصل إشعار التجربة إلى جهازك. أنت الآن على اطلاع بكل جديد من سُفرة.", kind: "update", revision: `test-${Date.now()}` }, { userId: c.get("user").id, endpoint });
+  if (!delivery.sent) fail(503, "لم تقبل خدمة الإشعارات الإرسال لهذا الجهاز. أعد تفعيل الاشتراك ثم حاول مجددًا.");
+  return c.json({ delivery });
 });
 
 app.post("/api/presence/verify", auth, employee, async (c) => {
@@ -509,7 +536,10 @@ app.put("/api/admin/announcement", auth, admin, async (c) => {
   await db.prepare("INSERT INTO announcement(id,kind,title,message,active,revision,updated_at,updated_by) VALUES(1,?,?,?,1,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,message=excluded.message,active=1,revision=excluded.revision,updated_at=excluded.updated_at,updated_by=excluded.updated_by")
     .bind(b.kind, b.title, b.message, b.expectedRevision + 1, Date.now(), c.get("user").id).run();
   await audit(db, c.get("user").id, "announcement.published", { kind: b.kind, title: b.title, revision: b.expectedRevision + 1 }, dayKey(Date.now()));
-  return c.json(await announcement(db, true));
+  const published = await announcement(db, true);
+  const push = await createPushService(db, c.env.ORIGIN);
+  const delivery = await push.deliver(published);
+  return c.json({ ...published, delivery });
 });
 
 app.delete("/api/admin/announcement", auth, admin, async (c) => {
@@ -724,13 +754,22 @@ app.onError((err, c) => {
 // ─── Export ───
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/uploads/")) {
-      return app.fetch(request, env, ctx);
+    try {
+      console.log("fetch:", request.url);
+      const url = new URL(request.url);
+      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/uploads/")) {
+        return await app.fetch(request, env, ctx);
+      }
+      return env.ASSETS.fetch(request);
+    } catch (err) {
+      console.error("FETCH ERROR:", err.message, err.stack);
+      return new Response(JSON.stringify({ error: err.message, stack: err.stack }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
     }
-    return env.ASSETS.fetch(request);
   },
   async scheduled(event, env, ctx) {
-    await sync(env);
+    try { await sync(env); } catch (e) { console.error("SYNC ERROR:", e.message); }
   },
 };
