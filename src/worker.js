@@ -91,14 +91,16 @@ async function history(db, id, day) {
   }
   return results;
 }
-async function weight(db, id, day) {
-  const h = await history(db, id, day);
+function historyWeight(h) {
   return h.every(r => r.winner && r.choice && r.winner !== r.choice) ? 2 : 1;
+}
+async function weight(db, id, day) {
+  return historyWeight(await history(db, id, day));
 }
 
 // ─── Sync (replaces setInterval scheduler) ───
 let lastSync = 0;
-const SYNC_INTERVAL = 15000;
+const SYNC_INTERVAL = 60000;
 
 async function reconcileTodaySchedule(db, day, s, actor = null) {
   const current = await getDay(db, day);
@@ -190,7 +192,7 @@ async function today(db, user) {
     : (await db.prepare("SELECT count(*) n FROM users WHERE role='employee' AND active=1").first()).n;
   const meals = await dayMeals(db, day);
   const hist = await history(db, user.id, day);
-  const w = await weight(db, user.id, day);
+  const w = historyWeight(hist);
   const ann = await announcement(db);
   return {
     serverNow: now, day, company: s.company, announcement: ann, budget: d.budget,
@@ -747,9 +749,10 @@ app.all("/api/*", (c) => c.json({ error: "المسار غير موجود." }, 40
 
 app.onError((err, c) => {
   if (err instanceof ApiError) return c.json({ error: err.message }, err.status);
-  console.error("Server error:", err.message);
-  return c.json({ error: "تعذر إكمال العملية. حاول لاحقاً." }, 500);
+  console.error("Server error:", err.message, err.stack);
+  return c.json({ error: err.message || "تعذر إكمال العملية. حاول لاحقاً." }, 500);
 });
+
 
 // ─── Export ───
 export default {
@@ -762,10 +765,10 @@ export default {
       }
       return env.ASSETS.fetch(request);
     } catch (err) {
-      console.error("FETCH ERROR:", err.message, err.stack);
-      return new Response(JSON.stringify({ error: err.message, stack: err.stack }), {
+      console.error("FETCH ERROR:", err.message);
+      return new Response(JSON.stringify({ error: "تعذر تحميل الصفحة. أعد المحاولة." }), {
         status: 500,
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }
       });
     }
   },
